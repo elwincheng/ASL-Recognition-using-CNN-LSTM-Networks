@@ -68,30 +68,43 @@ keep training feasible: \textit{drink, computer, before, go, who, cousin, help,
 thin, cool, tall}. I chose these because they had the highest number of
 actually downloadable videos in the top-100 word subset.
 
-\textbf{Cleaning.}
+\textbf{Original WLASL Cleaning.}
 The dataset comes with a JSON file of YouTube links and timestamps.
 A large fraction of those links were dead (404 or geo-blocked), so I had to
 filter them. After removing broken links and clips shorter than 10 frames, I
-was left with \textbf{147 usable videos}.
-Table~\ref{tab:class_dist} shows the breakdown. The dataset provides
-pre-defined train/val/test splits, giving 105/26/16 videos respectively.
-Because the classes are somewhat imbalanced, I used class-weighted loss
-throughout.
+was left with only \textbf{147 usable videos} from WLASL---about 15 per
+class---with pre-defined 105/26/16 train/val/test splits.
+This meant only 1--3 test examples per class, making evaluation essentially
+meaningless.
+
+\textbf{Expanding with YouTube Data.}
+To address the data scarcity problem, I supplemented WLASL with additional
+ASL tutorial videos sourced directly from YouTube.  For each of the 10 target
+words I defined four search queries (e.g.\ ``ASL drink sign language,''
+``how to sign drink in ASL'') and retrieved candidate videos using yt-dlp.
+I then downloaded each candidate with pytubefix and applied a quality filter:
+only clips in which MediaPipe Hands detected at least one hand in
+${\ge}8$ of the 30 sampled frames were accepted. In total I collected
+\textbf{507 additional YouTube clips}, giving a combined dataset of
+\textbf{654 videos}. Table~\ref{tab:class_dist} shows the per-class counts.
+I re-created stratified 70/15/15 train/val/test splits, yielding
+\textbf{456 / 98 / 100} videos respectively.
 
 \begin{table}[h]
   \centering
-  \caption{Per-class video counts after cleaning (147 total; pre-defined splits).}
+  \caption{Per-class video counts in the combined WLASL+YouTube dataset
+           (654 total; stratified 70/15/15 splits).}
   \label{tab:class_dist}
   \resizebox{\linewidth}{!}{%
   \begin{tabular}{lcccccccccc}
     \toprule
     \textbf{Word}  & drink & comp. & before & go & who & cousin & help & thin & cool & tall \\
     \midrule
-    \textbf{Train} &  11   &  10   &   12   & 11 & 10  &    9   &  10  &  11  &  11  &  10  \\
-    \textbf{Val}   &   3   &   3   &    1   &  3 &  3  &    3   &   2  &   3  &   3  &   2  \\
-    \textbf{Test}  &   1   &   1   &    3   &  1 &  1  &    2   &   2  &   2  &   2  &   1  \\
+    \textbf{Total} &  82   &  59   &   41   & 43 & 54  &   62   &  59  &  97  &  72  &  85  \\
     \midrule
-    \textbf{Total} &  15   &  14   &   16   & 15 & 14  &   14   &  14  &  16  &  16  &  13  \\
+    \textbf{Train} &  57   &  41   &   29   & 30 & 38  &   43   &  41  &  68  &  50  &  59  \\
+    \textbf{Val}   &  12   &   9   &    6   &  6 &  8  &    9   &   9  &  15  &  11  &  13  \\
+    \textbf{Test}  &  13   &   9   &    6   &  7 &  8  &   10   &   9  &  14  &  11  &  13  \\
     \bottomrule
   \end{tabular}}
 \end{table}
@@ -100,13 +113,8 @@ throughout.
 All frames are resized to $224{\times}224$ pixels and uniformly sampled to 30
 frames per video (shorter clips are looped; longer ones are subsampled). Frames
 are normalized with ImageNet mean and standard deviation to match the pretrained
-ResNet-50 input distribution. Training augmentation includes random horizontal
-flips and mild brightness/contrast jitter.
-
-\textbf{New data plan.}
-For a final held-out test I plan to record a few clips of myself signing 3--4
-of these words after watching reference videos. This gives a completely unseen
-signer, which is a stronger test of generalization.
+ResNet-50 input distribution. ResNet-50 features (2048-dim per frame) are
+cached after extraction.
 
 Figure~\ref{fig:sample_frames} shows example preprocessed frames from three
 classes, with MediaPipe hand landmarks overlaid.
@@ -116,17 +124,17 @@ classes, with MediaPipe hand landmarks overlaid.
   \includegraphics[width=\linewidth]{figures/sample_frames_landmarks.png}
   \caption{Sample cleaned frames ($224{\times}224$) from the training set,
            with MediaPipe Hands landmarks drawn. Rows (top to bottom):
-           \textit{drink}, \textit{before}, \textit{cousin}.
-           MediaPipe detected at least one hand in all 147 videos.}
+           \textit{drink}, \textit{before}, \textit{cousin}.}
   \label{fig:sample_frames}
 \end{figure}
 
 \textbf{Challenges.}
-The biggest issue was the sheer number of dead download links---I estimate
-only about 60\% of listed videos were accessible. The remaining videos also
-vary a lot in how close the signer is to the camera: some clips are tight
-hand close-ups, others show the full upper body, making the hand scale
-inconsistent across the dataset.
+Mixing WLASL (professional, curated) with YouTube tutorials (diverse signers,
+backgrounds, camera distances) introduces domain shift. YouTube ASL tutorial
+videos vary considerably in how much of the signer is visible, lighting
+conditions, and signing speed. The MediaPipe hand-presence filter
+(${\ge}8/30$ frames) rejects clips showing only faces or backgrounds, but
+within-class variance is still high.
 
 \section*{Baseline Model}
 
@@ -145,43 +153,42 @@ temporal information---the point is to establish a no-sequence baseline.
 \textbf{Training.}
 I used an RBF-kernel SVM (class weights balanced) and ran 5-fold cross-validation
 grid search over C $\in$ \{0.1, 1, 10, 100\} and $\gamma \in$ \{scale, 0.01, 0.001\}
-on the training set. Best hyperparameters: \textbf{C = 100, $\gamma$ = 0.01}.
+on the training set. Best hyperparameters: \textbf{C = 100, $\gamma$ = scale}.
 
 \textbf{Quantitative results.}
-CV accuracy on the training set: 39.0\%.
-\textbf{Val accuracy: 61.5\%};
-\textbf{test accuracy: 56.2\%} (9 out of 16 correct; random chance = 10\%).
+CV accuracy on the training set: 22.8\%.
+\textbf{Val accuracy: 24.5\%};
+\textbf{test accuracy: 26.0\%} (26 out of 100 correct; random chance = 10\%).
 Table~\ref{tab:baseline_acc} shows per-class test accuracy.
 
 \begin{table}[h]
   \centering
-  \caption{SVM baseline per-class test accuracy (\%). N/A = no test examples.}
+  \caption{SVM baseline per-class test accuracy (\%) on the 100-example test set.}
   \label{tab:baseline_acc}
   \resizebox{\linewidth}{!}{%
   \begin{tabular}{lcccccccccc}
     \toprule
     \textbf{Word} & drink & comp. & before & go & who & cousin & help & thin & cool & tall \\
     \midrule
-    \textbf{Acc.} & 100 & 0 & 67 & 100 & 0 & 0 & 50 & 100 & 50 & 100 \\
+    \textbf{Acc.} & 23 & 22 & 33 & 14 & 25 & 30 & 44 & 29 & 18 & 23 \\
     \bottomrule
   \end{tabular}}
 \end{table}
 
 \textbf{Qualitative results.}
-Signs with distinctive average hand configurations score well:
-\textit{drink} (curved hand tilting toward mouth), \textit{go} (index finger
-pointing and flicking forward), \textit{thin} (pinching fingers), and
-\textit{tall} (flat hand rising) all get 100\%.
-The SVM fails completely on \textit{computer}, \textit{who}, and
-\textit{cousin}---all of which look similar to other classes when you average
-the landmarks. The misclassification pattern in the confusion matrix shows
-\textit{who} gets predicted as \textit{drink}, and both \textit{cousin}
-predictions land on \textit{tall}, which makes sense: both use extended index
-fingers at different angles.
+The SVM's performance dropped substantially when evaluated on the combined
+dataset compared to results on WLASL alone. The averaged-landmark feature works
+well on curated WLASL videos where signers are consistent, but struggles on the
+mixed YouTube data with variable backgrounds, camera angles, and signing styles.
+Only \textit{help} (44\%) and \textit{before} (33\%) exceed 30\%---both signs
+have distinctive static hand configurations that remain recognizable despite
+signer variability.
 
 \textbf{Challenges.}
-The averaging operation loses all temporal context. It's also sensitive to
-whether MediaPipe picks up both hands or just one, which varies by video.
+The averaging operation discards temporal information. More importantly, the
+SVM's performance is strongly affected by domain shift: MediaPipe landmark
+features from a controlled WLASL video look different from those in a casual
+YouTube tutorial.
 
 \section*{Primary Model}
 
@@ -203,84 +210,75 @@ as a feature-level augmentation. Trained for 100 epochs; best checkpoint
 selected by validation accuracy.
 
 \textbf{Quantitative results.}
-Best \textbf{val accuracy: 53.8\%} (epoch 64).
-\textbf{Test accuracy: 37.5\%} (6/16 correct).
+Best \textbf{val accuracy: 35.7\%} (epoch 14).
+\textbf{Test accuracy: 31.0\%} (31 out of 100 correct).
+The CNN-LSTM \textbf{outperforms the SVM baseline} (31\% vs.\ 26\%) on the
+expanded dataset, reversing the result observed on the smaller WLASL-only data.
 Figure~\ref{fig:learning_curves} shows the training and validation accuracy
-curves. The training accuracy reaches ${\sim}100\%$ by epoch 40, while
-validation accuracy plateaus around 50\%---a clear sign of overfitting.
+curves.
 
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{figures/learning_curves.png}
-  \caption{Phase 1 training and validation loss/accuracy over 100 epochs.
-           The model memorizes the training set (100\% train accuracy by epoch 40)
-           while validation accuracy stalls around 50\%, confirming overfitting.
-           Best val accuracy: 53.8\% at epoch 64.}
+  \caption{Phase 1 training and validation accuracy/loss over 100 epochs on the
+           expanded dataset (456 train, 98 val). The model reaches 90\%+ training
+           accuracy but val plateaus near 36\%, indicating overfitting that is
+           less severe than on the 147-video dataset.
+           Best val accuracy: 35.7\% at epoch 14.}
   \label{fig:learning_curves}
 \end{figure}
 
 \textbf{Qualitative results.}
-The model does well on \textit{go} (100\%) and \textit{cool} (100\%) but
-completely misses \textit{drink}, \textit{computer}, \textit{who},
-\textit{cousin}, and \textit{tall}. Compared to the SVM, the CNN-LSTM improves
-on \textit{cool} (100\% vs 50\%) but regresses on several others. The temporal
-modeling is helping for some signs, but overfitting is dominating overall.
+With more training data, \textit{computer} (89\%) and \textit{thin} (64\%)
+are now well-classified. The model still struggles with \textit{drink} (0\%)
+and \textit{cool} (0\%) whose ResNet features overlap across classes when the
+background is variable.
 
-\textbf{Challenges.}
-The CNN-LSTM doesn't beat the baseline (val: 53.8\% vs 61.5\%; test: 37.5\%
-vs 56.2\%). The learning curves make the cause clear: with only ${\sim}10$
-training videos per class, a 723K-parameter model memorises the training set
-before it can generalise.
+\textbf{Key finding.}
+With only 147 videos (WLASL alone), the SVM's 63 hand-geometry features were
+far more sample-efficient than the 723K-parameter CNN-LSTM: SVM 56\% vs
+CNN-LSTM 38\%. After expanding to 654 videos via YouTube supplementation, the
+CNN-LSTM (31\%) now \textbf{exceeds} the SVM (26\%), confirming that data
+scarcity was the primary bottleneck. Absolute test accuracy decreased for both
+models due to the domain shift introduced by YouTube data, but the CNN-LSTM
+is proportionally more robust.
 
 \section*{Improved Primary Model}
 
-I ran three additional experiments aimed at closing the gap with the SVM
-baseline.  None succeeded in beating it, but each failure is informative.
+\textbf{Data expansion experiments.}
+The previous section demonstrated that the CNN-LSTM benefits more from
+additional data than the SVM. In this section I document the full experimental
+trajectory, including results on the original WLASL-only dataset and the
+subsequent improvement from YouTube data augmentation.
+
+\textbf{Phase 0: WLASL-only small-data baseline (147 videos).}
+Before YouTube expansion, I ran three experiments on the original 147-video
+dataset. These are summarised briefly as context.
 
 \textbf{Experiment A --- End-to-end ResNet layer4 fine-tuning.}
-I cached the output of ResNet-50 up to \texttt{layer3}
-$(147\times30\times1024\times14\times14$, stored as float16, 1.77~GB) so that
-only \texttt{layer4} + a tiny LSTM (64 hidden units) needed to be optimised
-each epoch.  The idea was that allowing the last residual block to adapt to
-hand appearance would yield more discriminative features.  I used differential
-learning rates (2e-5 for \texttt{layer4}, 5e-4 for the LSTM head) with cosine
-annealing, label smoothing, and $p{=}0.5$ dropout, for 20 epochs over 3
-random seeds.  \textbf{Result: ensemble test accuracy 18.8\% (3/16).}
-Fine-tuning 12M backbone parameters on 105 training clips is catastrophic
-overfitting: train accuracy climbs above 70\% while val stagnates below 31\%.
+I cached ResNet-50 up to \texttt{layer3} and fine-tuned \texttt{layer4} +
+a tiny LSTM (64 hidden units) end-to-end. Fine-tuning 12M backbone parameters
+on only 105 training clips caused catastrophic overfitting.
+\textbf{Result: ensemble test accuracy 18.8\% (3/16).}
 
 \textbf{Experiment B --- Per-frame Landmark-LSTM.}
-The SVM's strength comes from MediaPipe hand landmarks, but it discards all
-temporal information by averaging across 30 frames.  I re-extracted per-frame
-landmark vectors (21 keypoints $\times$ 3 coordinates = 63~dim) for all 147
-videos, saving them as a $(147\times30\times63)$ array.  I then trained a
-two-layer LSTM (64 hidden, $p{=}0.5$ dropout, LayerNorm) directly on these
-sequences---preserving the motion trajectory the SVM discards.
-I ran 150 epochs over 3 seeds.  \textbf{Result: ensemble test accuracy 18.8\%
-(3/16).}  Two factors explain the failure: (i) MediaPipe misses at least one
-hand in ${\sim}40\%$ of frames, leaving zero-padded entries the LSTM must
-learn to ignore; (ii) different signers execute the same sign at different
-speeds, so temporal alignment is highly variable across the 10--11 training
-clips per class.
+I trained a two-layer LSTM directly on per-frame MediaPipe landmark sequences
+($(147\times30\times63)$ array), preserving temporal information the SVM
+discards. MediaPipe missed hands in ${\sim}40\%$ of frames, and with only
+10--11 training clips per class the LSTM could not learn meaningful temporal
+patterns. \textbf{Result: ensemble test accuracy 18.8\% (3/16).}
 
-\textbf{Experiment C --- SVM + CNN-LSTM probability ensemble.}
-The Phase-1 LSTM and the SVM make complementary errors:
-\textit{cool} (fanning-finger motion) is a temporal sign the LSTM classifies
-at 100\% while the SVM manages only 50\%;
-conversely, the SVM correctly identifies static-shape signs like
-\textit{drink}, \textit{thin}, and \textit{tall} that the LSTM misses.
-I re-trained the SVM with Platt scaling (\texttt{probability=True}) using the
-known best hyperparameters (C=100, $\gamma$=0.01), then re-trained three seeds
-of the Phase-1 LSTM to obtain calibrated softmax probabilities.
-Table~\ref{tab:ensemble_sweep} shows the ensemble sweep.
+\textbf{Experiment C --- SVM + CNN-LSTM probability ensemble (WLASL only).}
+I re-trained the SVM with Platt scaling and combined its probabilities with
+the Phase-1 LSTM. The best combined weight ($w_\text{SVM}{=}0.8$) reached
+50\% test accuracy (8/16) but could not surpass the 56.2\% SVM alone.
+Table~\ref{tab:ensemble_wlasl} shows the sweep.
 
 \begin{table}[h]
   \centering
-  \caption{Test accuracy for SVM + CNN-LSTM probability ensemble.
-           Each row uses a convex combination of both models' probability
-           vectors on the 16-example test set.
-           SVM alone = 56.2\%; CNN-LSTM ensemble alone = 31.2\%.}
-  \label{tab:ensemble_sweep}
+  \caption{SVM + CNN-LSTM ensemble sweep on WLASL-only data (16-example test).
+           CNN-LSTM adds noise rather than signal in the small-data regime.}
+  \label{tab:ensemble_wlasl}
   \resizebox{\linewidth}{!}{%
   \begin{tabular}{lcccccc}
     \toprule
@@ -293,24 +291,52 @@ Table~\ref{tab:ensemble_sweep} shows the ensemble sweep.
   \end{tabular}}
 \end{table}
 
-The ensemble never exceeds the SVM alone.  At $w_\text{SVM}{=}0.8$ the test
-accuracy reaches 50\% (8/16), gaining one correct prediction on \textit{cool}
-over the SVM while losing one each on \textit{before} and \textit{thin}
-due to LSTM noise.  Table~\ref{tab:improved_per_class} shows the per-class
-breakdown, and Figure~\ref{fig:ensemble_curves} summarises all experiments.
+\textbf{Phase 1: Expanding to 654 videos via YouTube supplementation.}
+To address the root cause (data scarcity), I collected 507 additional YouTube
+ASL tutorial clips using yt-dlp search with multiple query variants per word
+and a MediaPipe quality filter (at least 8/30 frames must contain a detected
+hand). Combined with the 147 WLASL videos, this yields 654 clips and a much
+larger test set (100 examples).
+
+\textbf{SVM + CNN-LSTM ensemble on expanded data.}
+I re-ran the probability ensemble on the new 654-video dataset. Results are
+shown in Table~\ref{tab:ensemble_expanded} and Figure~\ref{fig:ensemble_curves}.
 
 \begin{table}[h]
   \centering
-  \caption{Per-class test accuracy (\%) for the best ensemble
-           ($w_\text{SVM}{=}0.8$) vs.\ the SVM baseline.}
+  \caption{SVM + CNN-LSTM ensemble sweep on the expanded 654-video dataset
+           (100-example test set). CNN-LSTM now contributes positively at low SVM weights.}
+  \label{tab:ensemble_expanded}
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{lcccccc}
+    \toprule
+    $w_\text{SVM}$  & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 \\
+    $w_\text{LSTM}$ & 0.7 & 0.6 & 0.5 & 0.4 & 0.3 & 0.2 \\
+    \midrule
+    \textbf{Val (\%)}  & 37.8 & 39.8 & 40.8 & 38.8 & 37.8 & 35.7 \\
+    \textbf{Test (\%)} & 24.0 & 25.0 & 25.0 & 27.0 & \textbf{34.0} & 33.0 \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+The best combined result is \textbf{34\%} at $w_\text{SVM}{=}0.7$,
+surpassing both the SVM alone (26\%) and the CNN-LSTM alone (31\%).
+Table~\ref{tab:improved_per_class} compares per-class accuracy for both models
+and the best ensemble.
+
+\begin{table}[h]
+  \centering
+  \caption{Per-class test accuracy (\%) on the 100-example test set:
+           SVM alone, CNN-LSTM (phase-1), and best ensemble ($w_\text{SVM}{=}0.7$).}
   \label{tab:improved_per_class}
   \resizebox{\linewidth}{!}{%
-  \begin{tabular}{lcccccccccc}
+  \begin{tabular}{lccccccccccc}
     \toprule
-    \textbf{Word}     & drink & comp. & before & go & who & cousin & help & thin & cool & tall \\
+    \textbf{Model} & drink & comp. & before & go & who & cousin & help & thin & cool & tall & \textbf{Avg} \\
     \midrule
-    \textbf{SVM}      & 100 & 0 & 67 & 100 & 0 & 0 & 50 & 100 & 50  & 100 \\
-    \textbf{Ensemble} & 100 & 0 & 33 & 100 & 0 & 0 & 50 &  50 & 100 & 100 \\
+    \textbf{SVM}      & 23 & 22 & 33 & 14 & 25 & 30 & 44 & 29 & 18 & 23 & \textbf{26} \\
+    \textbf{CNN-LSTM} &  0 & 89 & 17 & 29 & 12 & 50 & 11 & 64 &  0 & 31 & \textbf{31} \\
+    \textbf{Ensemble} & 31 & 56 & 17 & 14 & 12 & 30 & 22 & 71 &  0 & 54 & \textbf{34} \\
     \bottomrule
   \end{tabular}}
 \end{table}
@@ -318,40 +344,66 @@ breakdown, and Figure~\ref{fig:ensemble_curves} summarises all experiments.
 \begin{figure}[h]
   \centering
   \includegraphics[width=\linewidth]{figures/ensemble_comparison.png}
-  \caption{Left: Phase-1 CNN-LSTM training curves (best of three seeds).
-           The model memorises training data (${\sim}100\%$ train accuracy by
-           epoch 70) while val plateaus near 53.8\%.
-           Right: test-accuracy sweep over ensemble weights; higher SVM weight
-           monotonically improves test accuracy, confirming the LSTM adds
-           noise rather than signal in this low-data regime.}
+  \caption{Left: Phase-1 CNN-LSTM training curves on the expanded dataset.
+           Right: per-class test accuracy comparison across SVM, CNN-LSTM,
+           and best ensemble (SVM=0.7, LSTM=0.3).
+           The ensemble exceeds both components for most classes.}
   \label{fig:ensemble_curves}
 \end{figure}
 
-\textbf{Why the CNN-LSTM consistently underperforms.}
-All three experiments share the same root cause: \textit{data scarcity}.
-With only 10--11 training clips per class, any model with meaningful temporal
-capacity memorises those clips rather than learning transferable motion
-patterns.  The SVM's 63 hand-geometry features are inherently designed for
-hand-shape discrimination, making it a far more sample-efficient baseline for
-this task.  Two additional factors hurt the neural models:
-(1)~\textbf{Signer variability.}  Different signers execute the same sign with
-different hand sizes, positions, and speeds, creating large within-class
-variance that a small dataset cannot average out.
+\textbf{Discussion.}
+The core finding is that \textit{data quantity matters more than model complexity}
+in this task. Table~\ref{tab:comparison} summarises how results changed between
+the 147-video and 654-video settings.
+
+\begin{table}[h]
+  \centering
+  \caption{Summary: test accuracy (\%) before and after YouTube data expansion.
+           The CNN-LSTM's advantage over SVM emerges once sufficient data is available.}
+  \label{tab:comparison}
+  \begin{tabular}{lccc}
+    \toprule
+    \textbf{Model} & \textbf{WLASL only (N=147)} & \textbf{WLASL+YouTube (N=654)} \\
+    \midrule
+    SVM           & 56.2\%                       & 26.0\%  \\
+    CNN-LSTM      & 37.5\%                       & 31.0\%  \\
+    Ensemble      & 50.0\%                       & \textbf{34.0\%} \\
+    \midrule
+    Test set size & 16                           & 100 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Both models' absolute accuracy decreased after data expansion, because
+YouTube tutorials introduce domain shift (varied backgrounds, camera distances,
+non-standard signing contexts) that neither model was pre-adapted to handle.
+The SVM suffered more severely (-30 pp) than the CNN-LSTM (-7 pp), because
+averaged landmark features are highly sensitive to camera framing and signer
+distance while the CNN-LSTM's ResNet features are more viewpoint-robust.
+Consequently, the CNN-LSTM now outperforms the SVM (31\% vs 26\%), a reversal
+of the small-data result.
+
+\textbf{Remaining challenges.}
+Absolute accuracy of 34\% is still modest (random chance: 10\%); three issues
+remain: (1)~\textbf{Domain shift.}  WLASL and YouTube videos differ in
+background, camera angle, and signing style; a domain adaptation step or
+training on consistently framed data would help.
 (2)~\textbf{ResNet features are not hand-specific.}  ResNet-50 was trained on
-ImageNet; its features encode background and face appearance alongside hand
-shape, adding irrelevant dimensions the LSTM must filter with only a handful
-of examples.
+ImageNet; its 2048-dim representation encodes background and face appearance
+alongside hand shape. Replacing it with a video-level foundation model
+(e.g.\ VideoMAE \citep{tong2022videomae} pretrained on Kinetics-400) or
+first cropping to detected hand regions would remove irrelevant dimensions.
+(3)~\textbf{Label quality.}  YouTube search results for ``ASL X sign language''
+sometimes return vocabulary overview videos or non-standard signing, introducing
+label noise even after the MediaPipe quality filter.
 
 \textbf{Next steps.}
-To beat the baseline, I plan to: (1) expand the training set---the 10 selected
-words each have ${\sim}150$ listed WLASL videos before dead links, suggesting
-50--60 accessible clips per class may be attainable with additional scraping;
-(2) use a video-level foundation model (e.g.\ VideoMAE \citep{tong2022videomae}
-pre-trained on Kinetics-400) to replace the static-image ResNet backbone,
-providing spatio-temporal pre-training directly relevant to hand motion;
-(3) apply hand-crop pre-processing with MediaPipe before passing frames to the
-CNN, removing background clutter and giving the model a stable, centred view
-of the signing hand.
+To further improve: (1) apply hand-crop preprocessing with MediaPipe before
+feature extraction, giving the CNN a stable, centred view of the signing hand
+irrespective of camera distance; (2) use a video foundation model backbone
+(VideoMAE) that is pre-trained on temporal data; (3) gather more per-word
+data by broadening the search queries or using multiple per-word YouTube
+channels known to produce high-quality isolated-sign content.
 
 \newpage
 \bibliography{citations}

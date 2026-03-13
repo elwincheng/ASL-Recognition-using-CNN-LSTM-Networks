@@ -2,6 +2,8 @@
 data/frames.npy
 data/resnet50_features.npy
 data/layer3_features.npy
+data/youtube_frames.npy
+data/per_frame_landmarks.npy
 
 # MediaPipe model binary (download separately)
 hand_landmarker.task
