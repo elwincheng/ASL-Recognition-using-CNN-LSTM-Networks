@@ -1,0 +1,52 @@
+{
+  "drink": {
+    "train": 57,
+    "val": 12,
+    "test": 13
+  },
+  "computer": {
+    "train": 41,
+    "val": 9,
+    "test": 9
+  },
+  "before": {
+    "train": 29,
+    "val": 6,
+    "test": 6
+  },
+  "go": {
+    "train": 30,
+    "val": 6,
+    "test": 7
+  },
+  "who": {
+    "train": 38,
+    "val": 8,
+    "test": 8
+  },
+  "cousin": {
+    "train": 43,
+    "val": 9,
+    "test": 10
+  },
+  "help": {
+    "train": 41,
+    "val": 9,
+    "test": 9
+  },
+  "thin": {
+    "train": 68,
+    "val": 15,
+    "test": 14
+  },
+  "cool": {
+    "train": 50,
+    "val": 11,
+    "test": 11
+  },
+  "tall": {
+    "train": 59,
+    "val": 13,
+    "test": 13
+  }
+}
